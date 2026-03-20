@@ -2,7 +2,7 @@
 storage.py  –  CSV Logging for Confirmed Plates
 
 Every confirmed plate is appended to a CSV file with three columns:
-    plate_number, timestamp, image_path
+    car_plate_number, car_taken_timestamp, image_path
 
 A short cooldown prevents the same plate from being logged repeatedly
 when it stays in front of the camera.
@@ -12,7 +12,7 @@ import csv
 import os
 from datetime import datetime
 
-_CSV_HEADER   = ["plate_number", "timestamp", "image_path"]
+_CSV_HEADER   = ["car_plate_number", "car_taken_timestamp", "image_path"]
 _COOLDOWN_SEC = 15        # ignore the same plate within this window
 
 

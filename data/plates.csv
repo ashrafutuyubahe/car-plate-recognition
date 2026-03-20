@@ -1,3 +1,3 @@
-plate_number,timestamp
-RAD117K,2026-03-20 16:59:48,data/captures/RAD117K.png
-RAD117,2026-03-20 19:31:36,data/captures/RAD117.png
+car_plate_number,car_taken_timestamp,image_path
+RAD117K,2026-03-20 20:59:48,data/photos/RAD117K.png
+RAD117,2026-03-20 20:31:36,data/photos/RAD117.png
