@@ -1,22 +1,23 @@
 """
-camera.py — Step 0: Camera Validation
-Open the webcam, display live frames, and exit cleanly on 'q'.
-Run this first to confirm your camera works before running the pipeline.
+camera.py  –  Webcam Initialisation
+
+Opens a video-capture device at the requested resolution and verifies
+that the device is actually available before returning.
 """
 
 import cv2
 
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    raise RuntimeError("Camera not opened. Check permissions or camera index.")
 
-while True:
-    ok, frame = cap.read()
-    if not ok:
-        break
-    cv2.imshow("Camera Test  |  Press q to quit", frame)
-    if (cv2.waitKey(1) & 0xFF) == ord("q"):
-        break
+def open_camera(index: int = 0, width: int = 1280, height: int = 720):
+    """Return an opened ``cv2.VideoCapture`` or raise ``RuntimeError``."""
+    cap = cv2.VideoCapture(index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-cap.release()
-cv2.destroyAllWindows()
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open camera (index={index}).")
+
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"[camera] Opened camera {index}  –  {actual_w}×{actual_h}")
+    return cap

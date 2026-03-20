@@ -1,92 +1,85 @@
 """
-detect.py — Step 1: Plate Detection
-Detects license plate candidate regions from a live camera frame using
-contour analysis and geometric filtering (no deep learning required).
+detect.py  –  Step 1: License-Plate Detection
 
-Detection logic:
-  1. Convert frame to grayscale
-  2. Reduce noise with Gaussian blur
-  3. Find edges with Canny
-  4. Extract contours
-  5. Filter by minimum area and aspect ratio (wider than tall)
-  6. Return plausible plate candidates as rotated rectangles
-
-Run standalone to validate detection: python src/detect.py
+Uses a classical OpenCV contour pipeline (no deep learning):
+  grayscale → bilateral blur → Canny edges → morphological close → contour search
+Candidate rectangles are filtered by area and aspect ratio so that only
+plate-shaped regions survive.
 """
 
 import cv2
 import numpy as np
 
-# ----- Tunable constants -----
-MIN_AREA = 600          # Minimum contour area in pixels to be a plate candidate
-AR_MIN   = 2.0          # Minimum aspect ratio (width/height) of a plate
-AR_MAX   = 8.0          # Maximum aspect ratio
+# ── Tunable detection thresholds ──────────────────────────────────────────────
+MIN_PLATE_AREA   = 1000    # ignore contours smaller than this (px²)
+ASPECT_RATIO_MIN = 2.0     # plates are always wider than tall
+ASPECT_RATIO_MAX = 6.5
+MAX_CANDIDATES   = 5       # keep at most this many candidates per frame
+# Morphology kernel – merges nearby character edges into one plate blob
+_MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7))
 
 
-def find_plate_candidates(frame):
+def _sort_corners(pts):
+    """Order four corner points: top-left, top-right, bottom-right, bottom-left.
+    Required for a consistent perspective transform later."""
+    pts  = np.array(pts, dtype="float32")
+    s    = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
+    return np.array([
+        pts[np.argmin(s)],       # top-left  (smallest x+y)
+        pts[np.argmin(diff)],    # top-right (smallest x-y)
+        pts[np.argmax(s)],       # bottom-right (largest x+y)
+        pts[np.argmax(diff)],    # bottom-left  (largest x-y)
+    ], dtype="float32")
+
+
+def detect_plate(frame):
+    """Scan *frame* for rectangular plate-like contours.
+
+    Returns
+    -------
+    candidates : list[np.ndarray]
+        Each element is a (4, 2) float32 array of ordered corner points.
+        Sorted largest-first.  May be empty.
+    debug_frame : np.ndarray
+        Copy of *frame* with green boxes drawn around every candidate.
     """
-    Analyse a BGR frame and return a list of cv2.minAreaRect tuples
-    that are plausible license plate regions.
-    """
-    gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blur  = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blur, 100, 200)
+    debug_frame = frame.copy()
 
-    contours, _ = cv2.findContours(
-        edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
+    # 1. Convert to grayscale and smooth to reduce texture noise
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.bilateralFilter(gray, 11, 17, 17)
 
-    candidates = []
+    # 2. Edge detection
+    edges = cv2.Canny(gray, 30, 200)
+
+    # 3. Close small gaps so individual characters merge into one plate blob
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, _MORPH_KERNEL)
+
+    # 4. Find external contours, keep only the 20 largest
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:20]
+
+    # 5. Filter by geometry: must look like a plate (wide rectangle)
+    scored = []  # (area, 4-point box)
     for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < MIN_AREA:
-            continue
-
         rect = cv2.minAreaRect(cnt)
-        (_, _), (w, h), _ = rect
-        if w <= 0 or h <= 0:
+        (_cx, _cy), (w, h), _angle = rect
+        if w == 0 or h == 0:
             continue
+        aspect = max(w, h) / min(w, h)
+        area   = w * h
+        if ASPECT_RATIO_MIN <= aspect <= ASPECT_RATIO_MAX and area >= MIN_PLATE_AREA:
+            box = cv2.boxPoints(rect).astype(np.int32)
+            scored.append((area, box))
 
-        ar = max(w, h) / max(1.0, min(w, h))
-        if AR_MIN <= ar <= AR_MAX:
-            candidates.append(rect)
+    # 6. Keep the N best candidates, largest first
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    scored = scored[:MAX_CANDIDATES]
 
-    return candidates
+    ordered_candidates = []
+    for _area, quad in scored:
+        cv2.drawContours(debug_frame, [quad], -1, (0, 255, 0), 2)
+        ordered_candidates.append(_sort_corners(quad))
 
-
-def main():
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        raise RuntimeError("Camera not opened.")
-
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-
-        vis        = frame.copy()
-        candidates = find_plate_candidates(frame)
-
-        if candidates:
-            msg   = f"Plate detected  ({len(candidates)} candidate(s))"
-            color = (0, 255, 0)
-            for rect in candidates:
-                box = cv2.boxPoints(rect).astype(int)
-                cv2.polylines(vis, [box], True, (0, 255, 0), 2)
-        else:
-            msg   = "Searching for plate..."
-            color = (0, 200, 255)
-
-        cv2.putText(vis, msg,               (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
-        cv2.putText(vis, "Press q to quit", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.imshow("Step 1 — Plate Detection", vis)
-
-        if (cv2.waitKey(1) & 0xFF) == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-if __name__ == "__main__":
-    main()
+    return ordered_candidates, debug_frame
